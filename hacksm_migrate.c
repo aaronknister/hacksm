@@ -148,17 +148,10 @@ static int hsm_migrate(const char *path)
 	fsync(fd);
 	close(fd);
 
-	strncpy(h.magic, HSM_MAGIC, sizeof(h.magic));
-	h.size = st.st_size;
-	h.migrate_time = time(NULL);
-	h.device = st.st_dev;
-	h.inode = st.st_ino;
-	h.state = HSM_STATE_START;
-
 	/* this sleep is to work around a race in dmapi on GPFS. A read might have started
 	   before we setup the managed region. We need the read to complete before
 	   we can punch holes in the file. There must be a better way .... */
-	msleep(300);
+	msleep(1);
 
 	/* now upgrade to a exclusive right on the file */
 	ret = dm_upgrade_right(dmapi.sid, hanp, hlen, token);
@@ -166,6 +159,13 @@ static int hsm_migrate(const char *path)
 		printf("dm_upgrade_right failed for %s - %s\n", path, strerror(errno));
 		goto respond;
 	}
+
+	strncpy(h.magic, HSM_MAGIC, sizeof(h.magic));
+	h.size = st.st_size;
+	h.migrate_time = time(NULL);
+	h.device = st.st_dev;
+	h.inode = st.st_ino;
+	h.state = HSM_STATE_START;
 
 	ret = dm_set_dmattr(dmapi.sid, hanp, hlen, token, &attrname, 0, sizeof(h), (void*)&h);
 	if (ret == -1) {
@@ -182,6 +182,21 @@ static int hsm_migrate(const char *path)
 	if (ret == -1) {
 		printf("failed dm_set_region on %s - %s\n", path, strerror(errno));
 		hsm_store_unlink(st.st_dev, st.st_ino);
+		goto respond;
+	}
+
+	/* give those pesky reads another chance */
+	ret = dm_downgrade_right(dmapi.sid, hanp, hlen, token);
+	if (ret != 0) {
+		printf("dm_downgrade_right failed for %s - %s\n", path, strerror(errno));
+		goto respond;
+	}
+	
+	msleep(1);
+
+	ret = dm_upgrade_right(dmapi.sid, hanp, hlen, token);
+	if (ret != 0) {
+		printf("dm_downgrade_right failed for %s - %s\n", path, strerror(errno));
 		goto respond;
 	}
 

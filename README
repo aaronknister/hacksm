@@ -1,35 +1,24 @@
 This is a experimental HSM daemon and migrate tool. It is meant to be
 a platform for testing ideas in HSM migration.
 
-To download the code, either fetch with your web browser, or use git
-like this:
-
-   git clone http://samba.org/~tridge/hacksm/.git
-
 To use it first setup a shared filesystem with NFS to hold the HSM
-"store", putting it in the HSM_STORE location from hacksm.h. The
-default is /hacksm_store
+"store", putting it in the HSM_STORE location from hacksm.h
 
 Then start the HSM daemon like this:
 
    hacksmd /gpfs &
 
+You can then migrate files using hacksm_migrate, and view their state
+using hacksm_ls
+
 Note that if you have TSM installed you need to disable it. The simplest method is:
+
    onnode -p all mv /opt/tivoli /opt/tivoli.SAVED
 
 then reboot. 
 
 You will need to start hacksmd after mmstartup, but before you mount
 the filesystem.
-
-You can then migrate files using hacksm_migrate, and view their state
-using hacksm_ls
-
-You may also want to look at
- 
-  http://samba.org/~tridge/junkcode/tsm_torture.c
-
-for a test program that stresses out HSM implementations
 
 The "store" for hacksm is just a directory with files named by device
 and inode number. When a file is migrated the data is moved to the
