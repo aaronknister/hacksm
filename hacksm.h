@@ -33,6 +33,7 @@ enum hsm_migrate_state {
 
 struct hsm_attr {
 	char magic[4];
+	time_t migrate_time;
 	off_t size;
 	dev_t device;
 	ino_t inode;

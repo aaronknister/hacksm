@@ -89,6 +89,10 @@ static void hsm_migrate(const char *path)
 			exit(1);
 		}
 		if (h.state == HSM_STATE_START) {
+			if (h.migrate_time + 60 > time(NULL)) {
+				printf("Not migrating recent partially migrated file\n");
+				goto respond;
+			}
 			printf("Continuing migration of partly migrated file\n");
 			hsm_store_unlink(h.device, h.inode);
 		} else {
@@ -137,6 +141,7 @@ static void hsm_migrate(const char *path)
 
 	strncpy(h.magic, HSM_MAGIC, sizeof(h.magic));
 	h.size = st.st_size;
+	h.migrate_time = time(NULL);
 	h.device = st.st_dev;
 	h.inode = st.st_ino;
 	h.state = HSM_STATE_START;
@@ -159,6 +164,7 @@ static void hsm_migrate(const char *path)
 		goto respond;
 	}
 
+
 	/* we now release the right to let any reads that
 	   are pending to continue before we destroy the data */
 	ret = dm_release_right(dmapi.sid, hanp, hlen, token);
@@ -178,7 +184,7 @@ static void hsm_migrate(const char *path)
 	ret = dm_get_dmattr(dmapi.sid, hanp, hlen, token, &attrname, 
 			    sizeof(h), &h, &rlen);
 	if (ret != 0) {
-		printf("Abandoning partial migrate - attribute gone\n", h.state);
+		printf("Abandoning partial migrate - attribute gone\n");
 		goto respond;
 	}
 
