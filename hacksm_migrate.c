@@ -298,7 +298,7 @@ int main(int argc, char * const argv[])
 	argc -= optind;
 
 	if (cleanup) {
-		hsm_cleanup_tokens(dmapi.sid);
+		hsm_cleanup_tokens(dmapi.sid, DM_RESP_CONTINUE, 0);
 		if (argc == 0) {
 			return 0;
 		}

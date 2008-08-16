@@ -26,7 +26,7 @@ void hsm_recover_session(const char *name, dm_sessid_t *sid);
 int hsm_store_open(dev_t device, ino_t inode, int flags);
 int hsm_store_unlink(dev_t device, ino_t inode);
 void msleep(int t);
-void hsm_cleanup_tokens(dm_sessid_t sid);
+void hsm_cleanup_tokens(dm_sessid_t sid, dm_response_t response, int retcode);
 
 
 enum hsm_migrate_state {

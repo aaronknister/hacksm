@@ -55,7 +55,7 @@ const char *dmapi_event_string(dm_eventtype_t ev)
 void hsm_recover_session(const char *name, dm_sessid_t *sid)
 {
 	int ret, i;
-	u_int n;
+	u_int n = 0;
 	dm_sessid_t *sess = NULL;
 	dm_sessid_t oldsid = DM_NO_SESSION;
 
@@ -81,8 +81,8 @@ void hsm_recover_session(const char *name, dm_sessid_t *sid)
 	}
 
 	for (i=0;i<n;i++) {
-		char buf[DM_SESSION_INFO_LEN+1];
-		size_t len;
+		char buf[DM_SESSION_INFO_LEN+1] = "";
+		size_t len = 0;
 
 		ret = dm_query_session(sess[i], DM_SESSION_INFO_LEN, buf, &len);
 		if (ret != 0) {
@@ -137,7 +137,7 @@ void msleep(int t)
 	select(0,NULL,NULL, NULL, &tval);
 }
 
-void hsm_cleanup_tokens(dm_sessid_t sid)
+void hsm_cleanup_tokens(dm_sessid_t sid, dm_response_t response, int retcode)
 {
 	dm_token_t tok[10];
 	u_int n;
@@ -147,7 +147,7 @@ void hsm_cleanup_tokens(dm_sessid_t sid)
 		printf("Cleaning up %u tokens\n", n);
 		for (i=0;i<n;i++) {
 			dm_respond_event(sid, tok[i], 
-					 DM_RESP_CONTINUE, 0, 0, NULL);
+					 response, retcode, 0, NULL);
 		}
 	}
 }
