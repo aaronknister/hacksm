@@ -22,3 +22,11 @@ You may also want to look at
   http://samba.org/~tridge/junkcode/tsm_torture.c
 
 for a test program that stresses out HSM implementations
+
+The "store" for hacksm is just a directory with files named by device
+and inode number. When a file is migrated the data is moved to the
+store and a dmapi hole is punched in the original file. This mimicks
+the behaviour of real HSM daemons. When the hacksmd daemon gets a data
+event (indicating that someone wants to read or write the data in the
+file) then the data is restored from the "store" and the file can then
+be read normally.
