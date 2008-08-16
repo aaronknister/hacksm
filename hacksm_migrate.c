@@ -39,7 +39,7 @@ static void hsm_init(void)
 }
 
 
-static void hsm_migrate(const char *path)
+static int hsm_migrate(const char *path)
 {
 	int ret;
 	void *hanp = NULL;
@@ -54,6 +54,7 @@ static void hsm_migrate(const char *path)
 	dm_boolean_t exactFlag;
 	off_t ofs;
 	int fd;
+	int retval = 1;
 
 	ret = dm_path_to_handle(discard_const(path), &hanp, &hlen);
 	if (ret != 0) {
@@ -67,9 +68,17 @@ static void hsm_migrate(const char *path)
 		exit(1);
 	}
 
+	/* getting an exclusive right then downgrading seems to be much more reliable
+	   then going straight to a shared right */
 	ret = dm_request_right(dmapi.sid, hanp, hlen, token, DM_RR_WAIT, DM_RIGHT_EXCL);
 	if (ret != 0) {
 		printf("dm_request_right failed for %s - %s\n", path, strerror(errno));
+		goto respond;
+	}
+
+	ret = dm_downgrade_right(dmapi.sid, hanp, hlen, token);
+	if (ret != 0) {
+		printf("dm_downgrade_right failed for %s - %s\n", path, strerror(errno));
 		goto respond;
 	}
 
@@ -146,6 +155,18 @@ static void hsm_migrate(const char *path)
 	h.inode = st.st_ino;
 	h.state = HSM_STATE_START;
 
+	/* this sleep is to work around a race in dmapi on GPFS. A read might have started
+	   before we setup the managed region. We need the read to complete before
+	   we can punch holes in the file. There must be a better way .... */
+	msleep(300);
+
+	/* now upgrade to a exclusive right on the file */
+	ret = dm_upgrade_right(dmapi.sid, hanp, hlen, token);
+	if (ret != 0) {
+		printf("dm_upgrade_right failed for %s - %s\n", path, strerror(errno));
+		goto respond;
+	}
+
 	ret = dm_set_dmattr(dmapi.sid, hanp, hlen, token, &attrname, 0, sizeof(h), (void*)&h);
 	if (ret == -1) {
 		printf("failed dm_set_dmattr on %s - %s\n", path, strerror(errno));
@@ -164,22 +185,6 @@ static void hsm_migrate(const char *path)
 		goto respond;
 	}
 
-
-	/* we now release the right to let any reads that
-	   are pending to continue before we destroy the data */
-	ret = dm_release_right(dmapi.sid, hanp, hlen, token);
-	if (ret == -1) {
-		printf("failed dm_release_right on %s - %s\n", path, strerror(errno));
-		goto respond;
-	}
-
-	usleep(100000);
-
-	ret = dm_request_right(dmapi.sid, hanp, hlen, token, DM_RR_WAIT, DM_RIGHT_EXCL);
-	if (ret != 0) {
-		printf("dm_request_right failed for %s - %s\n", path, strerror(errno));
-		goto respond;
-	}
 
 	ret = dm_get_dmattr(dmapi.sid, hanp, hlen, token, &attrname, 
 			    sizeof(h), &h, &rlen);
@@ -211,6 +216,8 @@ static void hsm_migrate(const char *path)
 
 	printf("Migrated file '%s' of size %d\n", path, (int)st.st_size);
 
+	retval = 0;
+
 respond:
 	ret = dm_respond_event(dmapi.sid, token, DM_RESP_CONTINUE, 0, 0, NULL);
 	if (ret == -1) {
@@ -219,6 +226,7 @@ respond:
 	}
 
 	dm_handle_free(hanp, hlen);
+	return retval;
 }
 
 static void usage(void)
@@ -229,7 +237,7 @@ static void usage(void)
 
 int main(int argc, char * const argv[])
 {
-	int opt, i;
+	int opt, i, ret=0;
 
 	/* parse command-line options */
 	while ((opt = getopt(argc, argv, "h")) != -1) {
@@ -256,8 +264,8 @@ int main(int argc, char * const argv[])
 	hsm_init();
 
 	for (i=0;i<argc;i++) {
-		hsm_migrate(argv[i]);
+		ret |= hsm_migrate(argv[i]);
 	}
 
-	return 0;
+	return ret;
 }

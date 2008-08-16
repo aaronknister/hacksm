@@ -126,3 +126,14 @@ int hsm_store_unlink(dev_t device, ino_t inode)
 	free(fname);
 	return ret;
 }
+
+void msleep(int t)
+{
+	struct timeval tval;  
+
+	tval.tv_sec = 0;
+	tval.tv_usec = t;
+ 
+	select(0,NULL,NULL, NULL, &tval);
+}
+

@@ -341,7 +341,7 @@ static void hsm_wait_events(void)
 	while (1) {
 		dm_eventmsg_t *msg;
 		/* we don't use DM_RR_WAIT to ensure that the daemon can be killed */
-		usleep(10000);
+		msleep(10);
 		ret = dm_get_events(dmapi.sid, 0, 0, sizeof(buf), buf, &rlen);
 		if (ret < 0) {
 			if (errno == EAGAIN) continue;
