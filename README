@@ -1,6 +1,12 @@
 This is a experimental HSM daemon and migrate tool. It is meant to be
 a platform for testing ideas in HSM migration.
 
+To download the latest version of this code use git like this:
+
+  git clone http://samba.org/~tridge/hacksm/.git
+
+To update it later use "git pull"
+
 To use it first setup a shared filesystem with NFS to hold the HSM
 "store", putting it in the HSM_STORE location from hacksm.h
 
