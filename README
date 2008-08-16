@@ -1,0 +1,12 @@
+This is a experimental HSM daemon and migrate tool. It is meant to be
+a platform for testing ideas in HSM migration.
+
+To use it first setup a shared filesystem with NFS to hold the HSM
+"store", putting it in the HSM_STORE location from hacksm.h
+
+Then start the HSM daemon like this:
+
+   hacksmd /gpfs &
+
+You can then migrate files using hacksm_migrate, and view their state
+using hacksm_ls
