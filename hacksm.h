@@ -25,6 +25,7 @@ const char *dmapi_event_string(dm_eventtype_t ev);
 void hsm_recover_session(const char *name, dm_sessid_t *sid);
 int hsm_store_open(dev_t device, ino_t inode, int flags);
 int hsm_store_unlink(dev_t device, ino_t inode);
+void msleep(int t);
 
 enum hsm_migrate_state {
 	HSM_STATE_START     = 0,
