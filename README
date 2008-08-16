@@ -1,7 +1,7 @@
 This is a experimental HSM daemon and migrate tool. It is meant to be
 a platform for testing ideas in HSM migration.
 
-To download the code, eiither fetch with your web browser, or use git
+To download the code, either fetch with your web browser, or use git
 like this:
 
    git clone http://samba.org/~tridge/hacksm/.git
