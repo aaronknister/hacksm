@@ -11,6 +11,15 @@ Then start the HSM daemon like this:
 You can then migrate files using hacksm_migrate, and view their state
 using hacksm_ls
 
+Note that if you have TSM installed you need to disable it. The simplest method is:
+
+   onnode -p all mv /opt/tivoli /opt/tivoli.SAVED
+
+then reboot. 
+
+You will need to start hacksmd after mmstartup, but before you mount
+the filesystem.
+
 The "store" for hacksm is just a directory with files named by device
 and inode number. When a file is migrated the data is moved to the
 store and a dmapi hole is punched in the original file. This mimicks
