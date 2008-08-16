@@ -22,7 +22,7 @@ static void hsm_term_handler(int signal)
 }
 
 
-static void hsm_init(const char *path)
+static void hsm_init(void)
 {
 	char *dmapi_version = NULL;
 	dm_eventset_t eventSet;
@@ -190,18 +190,18 @@ static void hsm_handle_recall(dm_eventmsg_t *msg)
 	}
 
 done:
-	if (have_right) {
-		ret = dm_release_right(dmapi.sid, hanp, hlen, token);
-		if (ret == -1) {
-			printf("failed dm_release_right on %s\n", strerror(errno));
-		}
-	}
-
 	ret = dm_respond_event(dmapi.sid, msg->ev_token, 
 			       DM_RESP_CONTINUE, retcode, 0, NULL);
 	if (ret != 0) {
 		printf("Failed to respond to read event\n");
 		exit(1);
+	}
+
+	if (have_right) {
+		ret = dm_release_right(dmapi.sid, hanp, hlen, token);
+		if (ret == -1) {
+			printf("failed dm_release_right on %s\n", strerror(errno));
+		}
 	}
 }
 
@@ -315,21 +315,6 @@ static void hsm_handle_message(dm_eventmsg_t *msg)
 	}
 }
 
-static void hsm_cleanup_tokens(void)
-{
-	dm_token_t tok[10];
-	u_int n;
-	int ret, i;
-
-	while ((ret = dm_getall_tokens(dmapi.sid, 10, tok, &n)) == 0 && n > 0) {
-		printf("Cleaning up %u tokens\n", n);
-		for (i=0;i<n;i++) {
-			dm_respond_event(dmapi.sid, tok[i], 
-					 DM_RESP_CONTINUE, 0, 0, NULL);
-		}
-	}
-}
-
 static void hsm_wait_events(void)
 {
 	int ret;
@@ -357,17 +342,23 @@ static void hsm_wait_events(void)
 
 static void usage(void)
 {
-	printf("Usage: hacksmd PATH\n");
+	printf("Usage: hacksmd <options>\n");
+	printf("\n\tOptions:\n");
+	printf("\t\t -c                 cleanup lost tokens\n");
 	exit(0);
 }
 
 int main(int argc, char * const argv[])
 {
 	int opt;
-	char *fspath;	
+	bool cleanup = false;
+
 	/* parse command-line options */
-	while ((opt = getopt(argc, argv, "h")) != -1) {
+	while ((opt = getopt(argc, argv, "ch")) != -1) {
 		switch (opt) {
+		case 'c':
+			cleanup = true;
+			break;
 		case 'h':
 		default:
 			usage();
@@ -380,18 +371,16 @@ int main(int argc, char * const argv[])
 	argv += optind;
 	argc -= optind;
 
-	if (argc == 0) {
-		usage();
-	}
-
-	fspath = argv[0];
-
 	signal(SIGTERM, hsm_term_handler);
 	signal(SIGINT, hsm_term_handler);
 
-	hsm_init(fspath);
+	hsm_init();
 
-	hsm_cleanup_tokens();
+	hsm_cleanup_tokens(dmapi.sid);
+
+	if (cleanup) {
+		return 0;
+	}
 
 	hsm_wait_events();
 

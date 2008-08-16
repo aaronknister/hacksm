@@ -137,3 +137,18 @@ void msleep(int t)
 	select(0,NULL,NULL, NULL, &tval);
 }
 
+void hsm_cleanup_tokens(dm_sessid_t sid)
+{
+	dm_token_t tok[10];
+	u_int n;
+	int ret, i;
+
+	while ((ret = dm_getall_tokens(sid, 10, tok, &n)) == 0 && n > 0) {
+		printf("Cleaning up %u tokens\n", n);
+		for (i=0;i<n;i++) {
+			dm_respond_event(sid, tok[i], 
+					 DM_RESP_CONTINUE, 0, 0, NULL);
+		}
+	}
+}
+
