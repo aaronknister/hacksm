@@ -42,16 +42,15 @@ static void hsm_init(void)
 	char *dmapi_version = NULL;
 	dm_eventset_t eventSet;
 	int ret;
+	int errcode = 0;
 
-	ret = dm_init_service(&dmapi_version);
-	if (ret == -1 && errno == ENOSYS) {
-		printf("Waiting for DMAPI to initialise\n");
-		while ((ret = dm_init_service(&dmapi_version)) == -1 &&
-		       errno == ENOSYS) sleep(1);
-	}
-	if (ret != 0) {
-		printf("Failed to init dmapi (%s)\n", strerror(errno));
-		exit(1);
+	while ((ret = dm_init_service(&dmapi_version)) == -1) {
+		if (errno != errcode) {
+			errcode = errno;
+			printf("Waiting for DMAPI to initialise (%d: %s)\n", 
+			       errno, strerror(errno));
+		}
+		sleep(1);
 	}
 
 	printf("Initialised DMAPI version '%s'\n", dmapi_version);	
@@ -443,6 +442,11 @@ static void hsm_wait_events(void)
 		}
 		if (ret < 0) {
 			if (errno == EAGAIN) continue;
+			if (errno == ESTALE) {
+				printf("DMAPI service has shutdown - restarting\n");
+				hsm_init();
+				continue;
+			}
 			printf("Failed to get event (%s)\n", strerror(errno));
 			exit(1);
 		}
