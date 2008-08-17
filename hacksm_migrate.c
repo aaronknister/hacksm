@@ -188,8 +188,9 @@ static int hsm_migrate(const char *path)
 		goto respond;
 	}
 
+	/* mark the whole file as offline, including parts beyond EOF */
 	region.rg_offset = 0;
-	region.rg_size   = st.st_size;
+	region.rg_size   = (dm_size_t)~0ULL;
 	region.rg_flags  = DM_REGION_WRITE | DM_REGION_READ;
 
 	ret = dm_set_region(dmapi.sid, hanp, hlen, dmapi.token, 1, &region, &exactFlag);
