@@ -35,8 +35,9 @@ Note that if you have TSM installed you need to disable it. The simplest method 
 
 then reboot. 
 
-You will need to start hacksmd after mmstartup, but before you mount
-the filesystem.
+If GPFS has not started when hacksmd is started then it will wait for
+the DMAPI service to become active. This means you can start hacksmd
+at any time in the boot process.
 
 The file store
 --------------
