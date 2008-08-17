@@ -139,16 +139,41 @@ void msleep(int t)
 
 void hsm_cleanup_tokens(dm_sessid_t sid, dm_response_t response, int retcode)
 {
-	dm_token_t tok[10];
-	u_int n;
-	int ret, i;
+	dm_token_t *tok = NULL;
+	u_int n = 0;
+	int ret, i, total=0;
 
-	while ((ret = dm_getall_tokens(sid, 10, tok, &n)) == 0 && n > 0) {
-		printf("Cleaning up %u tokens\n", n);
-		for (i=0;i<n;i++) {
+	while (1) {
+		u_int n2;
+		ret = dm_getall_tokens(sid, n, tok, &n2);
+		if (ret == -1 && errno == E2BIG) {
+			n = n2;
+			tok = realloc(tok, sizeof(dm_token_t)*n);
+			continue;
+		}
+		if (ret == -1) {
+			printf("dm_getall_tokens - %s\n", strerror(errno));
+			return;
+		}
+		if (ret == 0 && n2 == 0) {
+			break;
+		}
+		printf("Cleaning up %u tokens\n", n2);
+		for (i=0;i<n2;i++) {
 			dm_respond_event(sid, tok[i], 
 					 response, retcode, 0, NULL);
+			total++;
 		}
 	}
+	if (tok) free(tok);
 }
 
+const char *timestring(void)
+{
+	time_t t = time(NULL);
+	struct tm *tm = localtime(&t);
+	static char TimeBuf[100];
+
+	strftime(TimeBuf,sizeof(TimeBuf)-1,"%Y/%m/%d %T",tm);
+	return TimeBuf;
+}

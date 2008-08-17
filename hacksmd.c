@@ -9,8 +9,10 @@
 
 static struct {
 	bool blocking_wait;
+	unsigned debug;
 } options = {
 	.blocking_wait = true,
+	.debug = 1,
 };
 
 static struct {
@@ -109,7 +111,6 @@ static void hsm_handle_recall(dm_eventmsg_t *msg)
 	int fd;
 	char buf[0x10000];
 	off_t ofs;
-	int have_right = 0;
 	dm_right_t right;
 	dm_response_t response = DM_RESP_CONTINUE;
 	int retcode = 0;
@@ -124,6 +125,8 @@ static void hsm_handle_recall(dm_eventmsg_t *msg)
 	ret = dm_query_right(dmapi.sid, hanp, hlen, token, &right);
 	if (ret != 0 && errno != ENOENT) {
 		printf("dm_query_right failed - %s\n", strerror(errno));
+		retcode = EIO;
+		response = DM_RESP_ABORT;
 		goto done;
 	}
 	
@@ -131,20 +134,24 @@ static void hsm_handle_recall(dm_eventmsg_t *msg)
 		ret = dm_request_right(dmapi.sid, hanp, hlen, token, DM_RR_WAIT, DM_RIGHT_EXCL);
 		if (ret != 0) {
 			printf("dm_request_right failed - %s\n", strerror(errno));
+			retcode = EIO;
+			response = DM_RESP_ABORT;
 			goto done;
 		}
 	}
-
-	have_right = 1;
 
 	ret = dm_get_dmattr(dmapi.sid, hanp, hlen, token, &attrname, 
 			    sizeof(h), &h, &rlen);
 	if (ret != 0) {
 		if (errno == ENOENT) {
-			printf("File already recalled (no attribute)\n");
+			if (options.debug > 2) {
+				printf("File already recalled (no attribute)\n");
+			}
 			goto done;
 		}
 		printf("dm_get_dmattr failed - %s\n", strerror(errno));
+		retcode = EIO;
+		response = DM_RESP_ABORT;
 		goto done;
 	}
 
@@ -180,9 +187,13 @@ static void hsm_handle_recall(dm_eventmsg_t *msg)
 		goto done;
 	}
 
-	printf("Recalling file %llx:%llx of size %d\n", 
-	       (unsigned long long)h.device, (unsigned long long)h.inode,
-	       (int)h.size);
+	if (options.debug > 1) {
+		printf("%s %s: Recalling file %llx:%llx of size %d\n", 
+		       timestring(),
+		       dmapi_event_string(msg->ev_type),
+		       (unsigned long long)h.device, (unsigned long long)h.inode,
+		       (int)h.size);
+	}
 
 	ofs = 0;
 	while ((ret = read(fd, buf, sizeof(buf))) > 0) {
@@ -220,7 +231,7 @@ static void hsm_handle_recall(dm_eventmsg_t *msg)
 
 done:
 	ret = dm_respond_event(dmapi.sid, msg->ev_token, 
-			       DM_RESP_CONTINUE, retcode, 0, NULL);
+			       response, retcode, 0, NULL);
 	if (ret != 0) {
 		printf("Failed to respond to read event\n");
 		exit(1);
@@ -237,6 +248,7 @@ static void hsm_handle_destroy(dm_eventmsg_t *msg)
 	dm_attrname_t attrname;
 	dm_token_t token = msg->ev_token;
 	struct hsm_attr h;
+	dm_right_t right;
 	dm_response_t response = DM_RESP_CONTINUE;
 	int retcode = 0;
 	dm_boolean_t exactFlag;
@@ -247,6 +259,24 @@ static void hsm_handle_destroy(dm_eventmsg_t *msg)
 
 	if (DM_TOKEN_EQ(token, DM_INVALID_TOKEN)) {
 		goto done;
+	}
+
+	ret = dm_query_right(dmapi.sid, hanp, hlen, token, &right);
+	if (ret != 0 && errno != ENOENT) {
+		printf("dm_query_right failed - %s\n", strerror(errno));
+		retcode = EIO;
+		response = DM_RESP_ABORT;
+		goto done;
+	}
+
+	if (right != DM_RIGHT_EXCL || errno == ENOENT) {
+		ret = dm_request_right(dmapi.sid, hanp, hlen, token, DM_RR_WAIT, DM_RIGHT_EXCL);
+		if (ret != 0) {
+			printf("dm_request_right failed - %s\n", strerror(errno));
+			retcode = EIO;
+			response = DM_RESP_ABORT;
+			goto done;
+		}
 	}
 
         memset(attrname.an_chars, 0, DM_ATTR_NAME_SIZE);
@@ -273,6 +303,13 @@ static void hsm_handle_destroy(dm_eventmsg_t *msg)
 		goto done;
 	}
 
+	if (options.debug > 1) {
+		printf("%s: Destroying file %llx:%llx of size %d\n", 
+		       dmapi_event_string(msg->ev_type),
+		       (unsigned long long)h.device, (unsigned long long)h.inode,
+		       (int)h.size);
+	}
+
 	ret = hsm_store_unlink(h.device, h.inode);
 	if (ret == -1) {
 		printf("WARNING: Failed to unlink store file for file 0x%llx:0x%llx\n",
@@ -296,7 +333,7 @@ done:
 	if (!DM_TOKEN_EQ(msg->ev_token,DM_NO_TOKEN) &&
 	    !DM_TOKEN_EQ(msg->ev_token, DM_INVALID_TOKEN)) {
 		ret = dm_respond_event(dmapi.sid, msg->ev_token, 
-				       DM_RESP_CONTINUE, retcode, 0, NULL);
+				       response, retcode, 0, NULL);
 		if (ret != 0) {
 			printf("Failed to respond to destroy event\n");
 			exit(1);
@@ -307,9 +344,6 @@ done:
 
 static void hsm_handle_message(dm_eventmsg_t *msg)
 {
-	printf("Got event %s from node 0x%x\n",
-	       dmapi_event_string(msg->ev_type), msg->ev_nodeid);
-
 	switch (msg->ev_type) {
 	case DM_EVENT_MOUNT:
 		hsm_handle_mount(msg);
@@ -368,28 +402,46 @@ static void hsm_wait_events(void)
 
 static void hsm_cleanup_events(void)
 {
-	dm_token_t tok = DM_NO_TOKEN;
-	u_int n = 0;
-	int ret;
 	char buf[0x1000];
 	size_t rlen;
+	dm_token_t *tok = NULL;
+	u_int n = 0;
+	int ret, i;
 
-	while ((ret = dm_getall_tokens(dmapi.sid, 1, &tok, &n)) == 0 && n > 0) {
-		dm_eventmsg_t *msg;
-		ret = dm_find_eventmsg(dmapi.sid, tok, sizeof(buf), buf, &rlen);
-		if (ret == -1) {
-			printf("Unable to find message for token in cleanup\n");
+	while (1) {
+		u_int n2;
+		ret = dm_getall_tokens(dmapi.sid, n, tok, &n2);
+		if (ret == -1 && errno == E2BIG) {
+			n = n2;
+			tok = realloc(tok, sizeof(dm_token_t)*n);
 			continue;
 		}
-		msg = (dm_eventmsg_t *)buf;
-		if (!DM_TOKEN_EQ(tok, msg->ev_token)) {
-			printf("Message token mismatch in cleanup\n");
-			dm_respond_event(dmapi.sid, tok, 
-					 DM_RESP_ABORT, EINTR, 0, NULL);
-		} else {
-			hsm_handle_message(msg);
+		if (ret == -1) {
+			printf("dm_getall_tokens - %s\n", strerror(errno));
+			return;
+		}
+		if (ret == 0 && n2 == 0) {
+			break;
+		}
+		printf("Cleaning up %u tokens\n", n2);
+		for (i=0;i<n2;i++) {
+			dm_eventmsg_t *msg;
+			ret = dm_find_eventmsg(dmapi.sid, tok[i], sizeof(buf), buf, &rlen);
+			if (ret == -1) {
+				printf("Unable to find message for token in cleanup\n");
+				continue;
+			}
+			msg = (dm_eventmsg_t *)buf;
+			if (!DM_TOKEN_EQ(tok[i], msg->ev_token)) {
+				printf("Message token mismatch in cleanup\n");
+				dm_respond_event(dmapi.sid, tok[i], 
+						 DM_RESP_ABORT, EINTR, 0, NULL);
+			} else {
+				hsm_handle_message(msg);
+			}
 		}
 	}
+	if (tok) free(tok);
 }
 
 static void usage(void)
@@ -407,10 +459,13 @@ int main(int argc, char * const argv[])
 	bool cleanup = false;
 
 	/* parse command-line options */
-	while ((opt = getopt(argc, argv, "chN")) != -1) {
+	while ((opt = getopt(argc, argv, "chNd:")) != -1) {
 		switch (opt) {
 		case 'c':
 			cleanup = true;
+			break;
+		case 'd':
+			options.debug = strtoul(optarg, NULL, 0);
 			break;
 		case 'N':
 			options.blocking_wait = false;
@@ -432,11 +487,12 @@ int main(int argc, char * const argv[])
 
 	hsm_init();
 
-	hsm_cleanup_events();
-
 	if (cleanup) {
+		hsm_cleanup_tokens(dmapi.sid, DM_RESP_ABORT, EINTR);
 		return 0;
 	}
+
+	hsm_cleanup_events();
 
 	hsm_wait_events();
 

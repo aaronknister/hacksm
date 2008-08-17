@@ -178,6 +178,8 @@ int main(int argc, char * const argv[])
 
 	hsm_init();
 
+	hsm_cleanup_tokens(dmapi.sid, DM_RESP_ABORT, EIO);
+
 	for (i=0;i<argc;i++) {
 		struct stat st;
 		if (lstat(argv[i], &st) != 0) continue;

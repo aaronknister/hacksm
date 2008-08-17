@@ -297,6 +297,8 @@ int main(int argc, char * const argv[])
 	argv += optind;
 	argc -= optind;
 
+	hsm_init();
+
 	if (cleanup) {
 		hsm_cleanup_tokens(dmapi.sid, DM_RESP_CONTINUE, 0);
 		if (argc == 0) {
@@ -306,8 +308,6 @@ int main(int argc, char * const argv[])
 
 	signal(SIGTERM, hsm_term_handler);
 	signal(SIGINT, hsm_term_handler);
-
-	hsm_init();
 
 	if (argc == 0) {
 		usage();
