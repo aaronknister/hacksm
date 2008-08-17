@@ -10,12 +10,6 @@
 #define SESSION_NAME "hacksm_migrate"
 
 static struct {
-	unsigned wait_time;
-} options = {
-	.wait_time = 0,
-};
-
-static struct {
 	dm_sessid_t sid;
 	dm_token_t token;
 } dmapi = {
@@ -24,6 +18,8 @@ static struct {
 
 static void hsm_term_handler(int signal)
 {
+	/* if we held any rights when we exit we need to release them by
+	   responding to the userevent we generated */
 	if (!DM_TOKEN_EQ(dmapi.token,DM_NO_TOKEN)) {
 		dm_respond_event(dmapi.sid, dmapi.token, DM_RESP_CONTINUE, 0, 0, NULL);		
 		dmapi.token = DM_NO_TOKEN;
@@ -80,8 +76,13 @@ static int hsm_migrate(const char *path)
 		exit(1);
 	}
 
-	/* getting an exclusive right then downgrading seems to be much more reliable
-	   then going straight to a shared right */
+	/* getting an exclusive right first guarantees that two
+	   migrate commands don't happen at the same time on the same
+	   file, and also guarantees that a recall isn't happening at
+	   the same time. We then downgrade to a shared right
+	   immediately, which still gives the same guarantee, but
+	   means that any reads on the file can proceeed while we are
+	   saving away the data during the migrate */
 	ret = dm_request_right(dmapi.sid, hanp, hlen, dmapi.token, DM_RR_WAIT, DM_RIGHT_EXCL);
 	if (ret != 0) {
 		printf("dm_request_right failed for %s - %s\n", path, strerror(errno));
@@ -160,14 +161,8 @@ static int hsm_migrate(const char *path)
 	fsync(fd);
 	close(fd);
 
-	/* this sleep is to work around a race in dmapi on GPFS. A read might have started
-	   before we setup the managed region. We need the read to complete before
-	   we can punch holes in the file. There must be a better way .... */
-	if (options.wait_time) {
-		msleep(options.wait_time);
-	}
-
-	/* now upgrade to a exclusive right on the file */
+	/* now upgrade to a exclusive right on the file before we
+	   change the dmattr and punch holes in the file. */
 	ret = dm_upgrade_right(dmapi.sid, hanp, hlen, dmapi.token);
 	if (ret != 0) {
 		printf("dm_upgrade_right failed for %s - %s\n", path, strerror(errno));
@@ -199,24 +194,6 @@ static int hsm_migrate(const char *path)
 		hsm_store_unlink(st.st_dev, st.st_ino);
 		goto respond;
 	}
-
-	/* give those pesky reads another chance */
-	ret = dm_downgrade_right(dmapi.sid, hanp, hlen, dmapi.token);
-	if (ret != 0) {
-		printf("dm_downgrade_right failed for %s - %s\n", path, strerror(errno));
-		goto respond;
-	}
-	
-	if (options.wait_time) {
-		msleep(options.wait_time);
-	}
-
-	ret = dm_upgrade_right(dmapi.sid, hanp, hlen, dmapi.token);
-	if (ret != 0) {
-		printf("dm_downgrade_right failed for %s - %s\n", path, strerror(errno));
-		goto respond;
-	}
-
 
 	ret = dm_get_dmattr(dmapi.sid, hanp, hlen, dmapi.token, &attrname, 
 			    sizeof(h), &h, &rlen);
@@ -267,7 +244,6 @@ static void usage(void)
 {
 	printf("Usage: hacksm_migrate <options> PATH..\n");
 	printf("\n\tOptions:\n");
-	printf("\t\t -w WAITTIME        time to wait in migrate (milliseconds)\n");
 	printf("\t\t -c                 cleanup lost tokens\n");
 	exit(0);
 }
@@ -278,11 +254,8 @@ int main(int argc, char * const argv[])
 	bool cleanup = false;
 
 	/* parse command-line options */
-	while ((opt = getopt(argc, argv, "hw:c")) != -1) {
+	while ((opt = getopt(argc, argv, "hc")) != -1) {
 		switch (opt) {
-		case 'w':
-			options.wait_time = strtoul(optarg, NULL, 0);
-			break;
 		case 'c':
 			cleanup = true;
 			break;
