@@ -570,6 +570,8 @@ int main(int argc, char * const argv[])
 	argv += optind;
 	argc -= optind;
 
+	signal(SIGCHLD, SIG_IGN);
+
 	signal(SIGTERM, hsm_term_handler);
 	signal(SIGINT, hsm_term_handler);
 
