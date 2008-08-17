@@ -10,9 +10,11 @@
 static struct {
 	bool blocking_wait;
 	unsigned debug;
+	bool use_fork;
 } options = {
 	.blocking_wait = true,
 	.debug = 2,
+	.use_fork = false,
 };
 
 static struct {
@@ -455,7 +457,16 @@ static void hsm_wait_events(void)
 		for (msg=(dm_eventmsg_t *)buf; 
 		     msg; 
 		     msg = DM_STEP_TO_NEXT(msg, dm_eventmsg_t *)) {
-			hsm_handle_message(msg);
+			/* optionally fork on each message, thus
+			   giving parallelism and allowing us to delay
+			   recalls, simulating slow tape speeds */
+			if (options.use_fork) {
+				if (fork() != 0) continue;
+				hsm_handle_message(msg);
+				_exit(0);
+			} else {
+				hsm_handle_message(msg);
+			}
 		}
 	}
 }
@@ -522,6 +533,7 @@ static void usage(void)
 	printf("\t\t -c                 cleanup lost tokens\n");
 	printf("\t\t -N                 use a non-blocking event wait\n");
 	printf("\t\t -d level           choose debug level\n");
+	printf("\t\t -F                 fork to handle each event\n");
 	exit(0);
 }
 
@@ -532,7 +544,7 @@ int main(int argc, char * const argv[])
 	bool cleanup = false;
 
 	/* parse command-line options */
-	while ((opt = getopt(argc, argv, "chNd:")) != -1) {
+	while ((opt = getopt(argc, argv, "chNd:F")) != -1) {
 		switch (opt) {
 		case 'c':
 			cleanup = true;
@@ -542,6 +554,9 @@ int main(int argc, char * const argv[])
 			break;
 		case 'N':
 			options.blocking_wait = false;
+			break;
+		case 'F':
+			options.use_fork = true;
 			break;
 		case 'h':
 		default:
