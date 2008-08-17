@@ -12,12 +12,19 @@
 
 static struct {
 	dm_sessid_t sid;
+	dm_token_t token;
 } dmapi = {
 	.sid = DM_NO_SESSION
 };
 
 static void hsm_term_handler(int signal)
 {
+	/* if we held any rights when we exit we need to release them by
+	   responding to the userevent we generated */
+	if (!DM_TOKEN_EQ(dmapi.token,DM_NO_TOKEN)) {
+		dm_respond_event(dmapi.sid, dmapi.token, DM_RESP_CONTINUE, 0, 0, NULL);		
+		dmapi.token = DM_NO_TOKEN;
+	}
 	printf("Got signal %d - exiting\n", signal);
 	exit(1);
 }
@@ -46,11 +53,11 @@ static void hsm_ls(const char *path)
 	void *hanp = NULL;
 	size_t hlen = 0;
 	dm_attrname_t attrname;
-	dm_token_t token = DM_NO_TOKEN;
 	size_t rlen;
 	struct hsm_attr h;
 	int fd;
-	int have_right = 0;
+
+	dmapi.token = DM_NO_TOKEN;
 
 	ret = dm_path_to_handle(discard_const(path), &hanp, &hlen);
 	if (ret != 0) {
@@ -58,24 +65,23 @@ static void hsm_ls(const char *path)
 		return;
 	}
 
-	ret = dm_create_userevent(dmapi.sid, 0, NULL, &token);
+	ret = dm_create_userevent(dmapi.sid, 0, NULL, &dmapi.token);
 	if (ret != 0) {
 		printf("dm_create_userevent failed for %s - %s\n", path, strerror(errno));
 		dm_handle_free(hanp, hlen);
 		return;
 	}
 
-	ret = dm_request_right(dmapi.sid, hanp, hlen, token, DM_RR_WAIT, DM_RIGHT_SHARED);
+	ret = dm_request_right(dmapi.sid, hanp, hlen, dmapi.token, DM_RR_WAIT, DM_RIGHT_SHARED);
 	if (ret != 0) {
 		printf("dm_request_right failed for %s - %s\n", path, strerror(errno));
 		goto done;
 	}
-	have_right = 1;
 
         memset(attrname.an_chars, 0, DM_ATTR_NAME_SIZE);
         strncpy((char*)attrname.an_chars, HSM_ATTRNAME, DM_ATTR_NAME_SIZE);
 
-	ret = dm_get_dmattr(dmapi.sid, hanp, hlen, token, &attrname, 
+	ret = dm_get_dmattr(dmapi.sid, hanp, hlen, dmapi.token, &attrname, 
 			    sizeof(h), &h, &rlen);
 	if (ret != 0 && errno != ENOENT) {
 		printf("dm_get_dmattr failed for %s - %s\n", path, strerror(errno));
@@ -104,18 +110,13 @@ static void hsm_ls(const char *path)
 	printf("m %7u %d  %s\n", (unsigned)h.size, (int)h.state, path);
 
 done:
-	if (have_right) {
-		ret = dm_release_right(dmapi.sid, hanp, hlen, token);
-		if (ret == -1) {
-			printf("failed dm_release_right on %s - %s\n", path, strerror(errno));
-		}
-	}
-
-	ret = dm_respond_event(dmapi.sid, token, DM_RESP_CONTINUE, 0, 0, NULL);
+	ret = dm_respond_event(dmapi.sid, dmapi.token, DM_RESP_CONTINUE, 0, 0, NULL);
 	if (ret == -1) {
 		printf("failed dm_respond_event on %s - %s\n", path, strerror(errno));
 		exit(1);
 	}
+
+	dmapi.token = DM_NO_TOKEN;
 
 	dm_handle_free(hanp, hlen);
 }
