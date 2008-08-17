@@ -12,7 +12,7 @@
 static struct {
 	unsigned wait_time;
 } options = {
-	.wait_time = 100,
+	.wait_time = 0,
 };
 
 static struct {

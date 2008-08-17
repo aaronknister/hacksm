@@ -18,6 +18,7 @@
 #include <time.h>
 #include <aio.h>
 #include <dmapi.h>
+#include <stdint.h>
 
 #define discard_const(ptr) ((void *)((intptr_t)(ptr)))
 
@@ -38,9 +39,9 @@ enum hsm_migrate_state {
 struct hsm_attr {
 	char magic[4];
 	time_t migrate_time;
-	off_t size;
-	dev_t device;
-	ino_t inode;
+	uint64_t size;
+	uint64_t device;
+	uint64_t inode;
 	enum hsm_migrate_state state;
 };
 

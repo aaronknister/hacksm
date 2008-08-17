@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=-Wall -g -m32
+CFLAGS=-Wall -g 
 LIBS=-ldmapi
 
 all: hacksmd hacksm_migrate hacksm_ls
