@@ -12,7 +12,7 @@ static struct {
 	unsigned debug;
 } options = {
 	.blocking_wait = true,
-	.debug = 1,
+	.debug = 2,
 };
 
 static struct {
@@ -450,6 +450,7 @@ static void usage(void)
 	printf("\n\tOptions:\n");
 	printf("\t\t -c                 cleanup lost tokens\n");
 	printf("\t\t -N                 use a non-blocking event wait\n");
+	printf("\t\t -d level           choose debug level\n");
 	exit(0);
 }
 
