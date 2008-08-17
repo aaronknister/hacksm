@@ -30,6 +30,11 @@ static void hsm_term_handler(int signal)
 }
 
 
+/*
+  initialise DMAPI, possibly recovering an existing session. The
+  hacksmd session is never destroyed, to allow for recovery of
+  partially completed events
+ */
 static void hsm_init(void)
 {
 	char *dmapi_version = NULL;
@@ -58,6 +63,12 @@ static void hsm_init(void)
 }
 
 
+/*
+  called on a DM_EVENT_MOUNT event . This just needs to acknowledge
+  the mount. We don't have any sort of 'setup' step before running
+  hacksmd on a filesystem, so it just accepts mount events from any
+  filesystem that supports DMAPI
+ */
 static void hsm_handle_mount(dm_eventmsg_t *msg)
 {
 	dm_mount_event_t *mount;
@@ -97,7 +108,10 @@ static void hsm_handle_mount(dm_eventmsg_t *msg)
 	}
 }
 
-
+/*
+  called on a data event from DMAPI. Check the files attribute, and if
+  it is migrated then do a recall
+ */
 static void hsm_handle_recall(dm_eventmsg_t *msg)
 {
 	dm_data_event_t *ev;
@@ -122,6 +136,7 @@ static void hsm_handle_recall(dm_eventmsg_t *msg)
         memset(attrname.an_chars, 0, DM_ATTR_NAME_SIZE);
         strncpy((char*)attrname.an_chars, HSM_ATTRNAME, DM_ATTR_NAME_SIZE);
 
+	/* make sure we have an exclusive right on the file */
 	ret = dm_query_right(dmapi.sid, hanp, hlen, token, &right);
 	if (ret != 0 && errno != ENOENT) {
 		printf("dm_query_right failed - %s\n", strerror(errno));
@@ -140,6 +155,8 @@ static void hsm_handle_recall(dm_eventmsg_t *msg)
 		}
 	}
 
+	/* get the attribute from the file, and make sure it is
+	   valid */
 	ret = dm_get_dmattr(dmapi.sid, hanp, hlen, token, &attrname, 
 			    sizeof(h), &h, &rlen);
 	if (ret != 0) {
@@ -163,12 +180,17 @@ static void hsm_handle_recall(dm_eventmsg_t *msg)
 	}
 
 	if (strncmp(h.magic, HSM_MAGIC, sizeof(h.magic)) != 0) {
-		printf("Bad magic '%*.*s'\n", (int)sizeof(h.magic), (int)sizeof(h.magic), h.magic);
+		printf("Bad magic '%*.*s'\n", (int)sizeof(h.magic), (int)sizeof(h.magic),
+		       h.magic);
 		retcode = EIO;
 		response = DM_RESP_ABORT;
 		goto done;
 	}
 
+	/* mark the file as being recalled. This ensures that if
+	   hacksmd dies part way through the recall that another
+	   migrate won't happen until the recall is completed by a
+	   restarted hacksmd */
 	h.state = HSM_STATE_RECALL;
 	ret = dm_set_dmattr(dmapi.sid, hanp, hlen, token, &attrname, 0, sizeof(h), (void*)&h);
 	if (ret != 0) {
@@ -178,6 +200,8 @@ static void hsm_handle_recall(dm_eventmsg_t *msg)
 		goto done;
 	}
 
+	/* get the migrated data from the store, and put it in the
+	   file with invisible writes */
 	fd = hsm_store_open(h.device, h.inode, O_RDONLY);
 	if (fd == -1) {
 		printf("Failed to open store file for file 0x%llx:0x%llx\n",
@@ -208,6 +232,7 @@ static void hsm_handle_recall(dm_eventmsg_t *msg)
 	}
 	close(fd);
 
+	/* remove the attribute from the file - it is now fully recalled */
 	ret = dm_remove_dmattr(dmapi.sid, hanp, hlen, token, 0, &attrname);
 	if (ret != 0) {
 		printf("dm_remove_dmattr failed - %s\n", strerror(errno));
@@ -216,11 +241,13 @@ static void hsm_handle_recall(dm_eventmsg_t *msg)
 		goto done;
 	}
 
+	/* remove the store file */
 	ret = hsm_store_unlink(h.device, h.inode);
 	if (ret != 0) {
 		printf("WARNING: Failed to unlink store file\n");
 	}
 
+	/* remove the managed region from the file */
 	ret = dm_set_region(dmapi.sid, hanp, hlen, token, 0, NULL, &exactFlag);
 	if (ret == -1) {
 		printf("failed dm_set_region - %s\n", strerror(errno));
@@ -230,6 +257,7 @@ static void hsm_handle_recall(dm_eventmsg_t *msg)
 	}
 
 done:
+	/* tell the kernel that the event has been handled */
 	ret = dm_respond_event(dmapi.sid, msg->ev_token, 
 			       response, retcode, 0, NULL);
 	if (ret != 0) {
@@ -239,6 +267,9 @@ done:
 }
 
 
+/*
+  called on a DM_EVENT_DESTROY event, when a file is being deleted
+ */
 static void hsm_handle_destroy(dm_eventmsg_t *msg)
 {
 	dm_destroy_event_t *ev;
@@ -261,6 +292,7 @@ static void hsm_handle_destroy(dm_eventmsg_t *msg)
 		goto done;
 	}
 
+	/* make sure we have an exclusive lock on the file */
 	ret = dm_query_right(dmapi.sid, hanp, hlen, token, &right);
 	if (ret != 0 && errno != ENOENT) {
 		printf("dm_query_right failed - %s\n", strerror(errno));
@@ -282,6 +314,8 @@ static void hsm_handle_destroy(dm_eventmsg_t *msg)
         memset(attrname.an_chars, 0, DM_ATTR_NAME_SIZE);
         strncpy((char*)attrname.an_chars, HSM_ATTRNAME, DM_ATTR_NAME_SIZE);
 
+	/* get the attribute and check it is valid. This is just
+	   paranoia really, as the file is going away */
 	ret = dm_get_dmattr(dmapi.sid, hanp, hlen, token, &attrname, 
 			    sizeof(h), &h, &rlen);
 	if (ret != 0) {
@@ -310,12 +344,14 @@ static void hsm_handle_destroy(dm_eventmsg_t *msg)
 		       (int)h.size);
 	}
 
+	/* remove the store file */
 	ret = hsm_store_unlink(h.device, h.inode);
 	if (ret == -1) {
 		printf("WARNING: Failed to unlink store file for file 0x%llx:0x%llx\n",
 		       (unsigned long long)h.device, (unsigned long long)h.inode);
 	}
 
+	/* remove the attribute */
 	ret = dm_remove_dmattr(dmapi.sid, hanp, hlen, token, 0, &attrname);
 	if (ret != 0) {
 		printf("dm_remove_dmattr failed - %s\n", strerror(errno));
@@ -324,12 +360,14 @@ static void hsm_handle_destroy(dm_eventmsg_t *msg)
 		goto done;
 	}
 
+	/* and clear the managed region */
 	ret = dm_set_region(dmapi.sid, hanp, hlen, token, 0, NULL, &exactFlag);
 	if (ret == -1) {
 		printf("WARNING: failed dm_set_region - %s\n", strerror(errno));
 	}
 
 done:
+	/* only respond if the token is real */
 	if (!DM_TOKEN_EQ(msg->ev_token,DM_NO_TOKEN) &&
 	    !DM_TOKEN_EQ(msg->ev_token, DM_INVALID_TOKEN)) {
 		ret = dm_respond_event(dmapi.sid, msg->ev_token, 
@@ -341,7 +379,9 @@ done:
 	}
 }
 
-
+/*
+  main switch for DMAPI messages
+ */
 static void hsm_handle_message(dm_eventmsg_t *msg)
 {
 	switch (msg->ev_type) {
@@ -370,10 +410,13 @@ static void hsm_handle_message(dm_eventmsg_t *msg)
 	}
 }
 
+/*
+  wait for DMAPI events to come in and dispatch them
+ */
 static void hsm_wait_events(void)
 {
 	int ret;
-	char buf[0x100000];
+	char buf[0x10000];
 	size_t rlen;
 
 	printf("Waiting for events\n");
@@ -383,7 +426,11 @@ static void hsm_wait_events(void)
 		if (options.blocking_wait) {
 			ret = dm_get_events(dmapi.sid, 0, DM_EV_WAIT, sizeof(buf), buf, &rlen);
 		} else {
-			/* we don't use DM_RR_WAIT to ensure that the daemon can be killed */
+			/* optionally don't use DM_RR_WAIT to ensure
+			   that the daemon can be killed. This is only
+			   needed because GPFS uses an uninterruptible
+			   sleep for dm_get_events with DM_EV_WAIT. It
+			   should be an interruptible sleep */
 			msleep(10);
 			ret = dm_get_events(dmapi.sid, 0, 0, sizeof(buf), buf, &rlen);
 		}
@@ -392,14 +439,20 @@ static void hsm_wait_events(void)
 			printf("Failed to get event (%s)\n", strerror(errno));
 			exit(1);
 		}
-		
-		for (msg=(dm_eventmsg_t *)buf; msg; msg = DM_STEP_TO_NEXT(msg, dm_eventmsg_t *)) {
+
+		/* loop over all the messages we received */
+		for (msg=(dm_eventmsg_t *)buf; 
+		     msg; 
+		     msg = DM_STEP_TO_NEXT(msg, dm_eventmsg_t *)) {
 			hsm_handle_message(msg);
 		}
 	}
 }
 
-
+/*
+  on startup we look for partially completed events from an earlier
+  instance of hacksmd, and continue them if we can
+ */
 static void hsm_cleanup_events(void)
 {
 	char buf[0x1000];
@@ -426,12 +479,16 @@ static void hsm_cleanup_events(void)
 		printf("Cleaning up %u tokens\n", n2);
 		for (i=0;i<n2;i++) {
 			dm_eventmsg_t *msg;
+			/* get the message associated with this token
+			   back from the kernel */
 			ret = dm_find_eventmsg(dmapi.sid, tok[i], sizeof(buf), buf, &rlen);
 			if (ret == -1) {
 				printf("Unable to find message for token in cleanup\n");
 				continue;
 			}
 			msg = (dm_eventmsg_t *)buf;
+			/* there seems to be a bug where GPFS
+			   sometimes gives us a garbage token here */
 			if (!DM_TOKEN_EQ(tok[i], msg->ev_token)) {
 				printf("Message token mismatch in cleanup\n");
 				dm_respond_event(dmapi.sid, tok[i], 
@@ -444,6 +501,9 @@ static void hsm_cleanup_events(void)
 	if (tok) free(tok);
 }
 
+/*
+  show program usage
+ */
 static void usage(void)
 {
 	printf("Usage: hacksmd <options>\n");
@@ -454,6 +514,7 @@ static void usage(void)
 	exit(0);
 }
 
+/* main code */
 int main(int argc, char * const argv[])
 {
 	int opt;
