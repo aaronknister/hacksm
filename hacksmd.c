@@ -11,10 +11,12 @@ static struct {
 	bool blocking_wait;
 	unsigned debug;
 	bool use_fork;
+	unsigned recall_delay;
 } options = {
 	.blocking_wait = true,
 	.debug = 2,
 	.use_fork = false,
+	.recall_delay = 0,
 };
 
 static struct {
@@ -225,6 +227,10 @@ static void hsm_handle_recall(dm_eventmsg_t *msg)
 		       dmapi_event_string(msg->ev_type),
 		       (unsigned long long)h.device, (unsigned long long)h.inode,
 		       (int)h.size);
+	}
+
+	if (options.recall_delay) {
+		sleep(random() % options.recall_delay);
 	}
 
 	ofs = 0;
@@ -462,6 +468,7 @@ static void hsm_wait_events(void)
 			   recalls, simulating slow tape speeds */
 			if (options.use_fork) {
 				if (fork() != 0) continue;
+				srandom(getpid() ^ time(NULL));
 				hsm_handle_message(msg);
 				_exit(0);
 			} else {
@@ -516,7 +523,9 @@ static void hsm_cleanup_events(void)
 				dm_respond_event(dmapi.sid, tok[i], 
 						 DM_RESP_ABORT, EINTR, 0, NULL);
 			} else {
+				unsigned saved_delay = options.recall_delay;
 				hsm_handle_message(msg);
+				options.recall_delay = saved_delay;
 			}
 		}
 	}
@@ -534,6 +543,7 @@ static void usage(void)
 	printf("\t\t -N                 use a non-blocking event wait\n");
 	printf("\t\t -d level           choose debug level\n");
 	printf("\t\t -F                 fork to handle each event\n");
+	printf("\t\t -R delay           set a random delay on recall up to 'delay' seconds\n");
 	exit(0);
 }
 
@@ -544,13 +554,16 @@ int main(int argc, char * const argv[])
 	bool cleanup = false;
 
 	/* parse command-line options */
-	while ((opt = getopt(argc, argv, "chNd:F")) != -1) {
+	while ((opt = getopt(argc, argv, "chNd:FR:")) != -1) {
 		switch (opt) {
 		case 'c':
 			cleanup = true;
 			break;
 		case 'd':
 			options.debug = strtoul(optarg, NULL, 0);
+			break;
+		case 'R':
+			options.recall_delay = strtoul(optarg, NULL, 0);
 			break;
 		case 'N':
 			options.blocking_wait = false;
