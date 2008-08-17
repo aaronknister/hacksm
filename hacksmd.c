@@ -23,6 +23,8 @@ static struct {
 
 #define SESSION_NAME "hacksmd"
 
+/* no special handling on terminate in hacksmd, as we want existing
+   events to stay around so we can continue them on restart */
 static void hsm_term_handler(int signal)
 {
 	printf("Got signal %d - exiting\n", signal);
@@ -42,8 +44,13 @@ static void hsm_init(void)
 	int ret;
 
 	ret = dm_init_service(&dmapi_version);
+	if (ret == -1 && errno == ENOSYS) {
+		printf("Waiting for DMAPI to initialise\n");
+		while ((ret = dm_init_service(&dmapi_version)) == -1 &&
+		       errno == ENOSYS) sleep(1);
+	}
 	if (ret != 0) {
-		printf("Failed to init dmapi\n");
+		printf("Failed to init dmapi (%s)\n", strerror(errno));
 		exit(1);
 	}
 
