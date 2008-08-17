@@ -1,14 +1,26 @@
 This is a experimental HSM daemon and migrate tool. It is meant to be
 a platform for testing ideas in HSM migration.
 
+Written by Andrew Tridgell, August 2008
+
+Download
+--------
+
 To download the latest version of this code use git like this:
 
   git clone http://samba.org/~tridge/hacksm/.git
 
 To update it later use "git pull"
 
+
+Installation
+------------
+
 To use it first setup a shared filesystem with NFS to hold the HSM
-"store", putting it in the HSM_STORE location from hacksm.h
+"store", putting it in the HSM_STORE location from hacksm.h (the
+default is /hacksm_store). This needs to be mounted on all nodes. You
+can also use GPFS for this store, as long as the filesystem you use
+doesn't have DMAPI enabled. 
 
 Then start the HSM daemon like this:
 
@@ -25,6 +37,9 @@ then reboot.
 
 You will need to start hacksmd after mmstartup, but before you mount
 the filesystem.
+
+The file store
+--------------
 
 The "store" for hacksm is just a directory with files named by device
 and inode number. When a file is migrated the data is moved to the
