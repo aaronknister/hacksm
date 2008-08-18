@@ -17,10 +17,12 @@ static struct {
 	.sid = DM_NO_SESSION
 };
 
+/*
+  if we exit unexpectedly then we need to cleanup any rights we held
+  by reponding to our userevent
+ */
 static void hsm_term_handler(int signal)
 {
-	/* if we held any rights when we exit we need to release them by
-	   responding to the userevent we generated */
 	if (!DM_TOKEN_EQ(dmapi.token,DM_NO_TOKEN)) {
 		dm_respond_event(dmapi.sid, dmapi.token, DM_RESP_CONTINUE, 0, 0, NULL);		
 		dmapi.token = DM_NO_TOKEN;
@@ -29,7 +31,9 @@ static void hsm_term_handler(int signal)
 	exit(1);
 }
 
-
+/*
+  connect to DMAPI
+ */
 static void hsm_init(void)
 {
 	char *dmapi_version = NULL;
@@ -46,7 +50,9 @@ static void hsm_init(void)
 	hsm_recover_session(SESSION_NAME, &dmapi.sid);
 }
 
-
+/*
+  list one file
+ */
 static void hsm_ls(const char *path)
 {
 	int ret;
@@ -65,6 +71,7 @@ static void hsm_ls(const char *path)
 		return;
 	}
 
+	/* create a user event to hold a lock on the file while listing */
 	ret = dm_create_userevent(dmapi.sid, 0, NULL, &dmapi.token);
 	if (ret != 0) {
 		printf("dm_create_userevent failed for %s - %s\n", path, strerror(errno));
@@ -72,7 +79,9 @@ static void hsm_ls(const char *path)
 		return;
 	}
 
-	ret = dm_request_right(dmapi.sid, hanp, hlen, dmapi.token, DM_RR_WAIT, DM_RIGHT_SHARED);
+	/* we only need a shared right */
+	ret = dm_request_right(dmapi.sid, hanp, hlen, dmapi.token, 
+			       DM_RR_WAIT, DM_RIGHT_SHARED);
 	if (ret != 0) {
 		printf("dm_request_right failed for %s - %s\n", path, strerror(errno));
 		goto done;
@@ -81,6 +90,7 @@ static void hsm_ls(const char *path)
         memset(attrname.an_chars, 0, DM_ATTR_NAME_SIZE);
         strncpy((char*)attrname.an_chars, HSM_ATTRNAME, DM_ATTR_NAME_SIZE);
 
+	/* get the attribute on the file */
 	ret = dm_get_dmattr(dmapi.sid, hanp, hlen, dmapi.token, &attrname, 
 			    sizeof(h), &h, &rlen);
 	if (ret != 0 && errno != ENOENT) {
@@ -97,6 +107,7 @@ static void hsm_ls(const char *path)
 		goto done;
 	}
 
+	/* if it is migrated then also check the store file is OK */
 	if (h.state == HSM_STATE_MIGRATED) {
 		fd = hsm_store_open(h.device, h.inode, O_RDONLY);
 		if (fd == -1) {
@@ -121,7 +132,9 @@ done:
 	dm_handle_free(hanp, hlen);
 }
 
-
+/*
+  list all files in a directory
+ */
 static void hsm_lsdir(const char *path)
 {
 	DIR *d;
