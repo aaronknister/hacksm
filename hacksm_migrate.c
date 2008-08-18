@@ -16,10 +16,13 @@ static struct {
 	.sid = DM_NO_SESSION
 };
 
+
+/*
+  if we exit unexpectedly then we need to cleanup any rights we held
+  by reponding to our userevent
+ */
 static void hsm_term_handler(int signal)
 {
-	/* if we held any rights when we exit we need to release them by
-	   responding to the userevent we generated */
 	if (!DM_TOKEN_EQ(dmapi.token,DM_NO_TOKEN)) {
 		dm_respond_event(dmapi.sid, dmapi.token, DM_RESP_CONTINUE, 0, 0, NULL);		
 		dmapi.token = DM_NO_TOKEN;
@@ -29,6 +32,9 @@ static void hsm_term_handler(int signal)
 }
 
 
+/*
+  initialise the DMAPI connection
+ */
 static void hsm_init(void)
 {
 	char *dmapi_version = NULL;
@@ -45,7 +51,9 @@ static void hsm_init(void)
 	hsm_recover_session(SESSION_NAME, &dmapi.sid);
 }
 
-
+/*
+  migrate one file
+ */
 static int hsm_migrate(const char *path)
 {
 	int ret;
@@ -70,6 +78,8 @@ static int hsm_migrate(const char *path)
 		exit(1);
 	}
 
+	/* we create a user event which we use to gain exclusive
+	   rights on the file */
 	ret = dm_create_userevent(dmapi.sid, 0, NULL, &dmapi.token);
 	if (ret != 0) {
 		printf("dm_create_userevent failed for %s - %s\n", path, strerror(errno));
@@ -89,6 +99,8 @@ static int hsm_migrate(const char *path)
 		goto respond;
 	}
 
+	/* now downgrade the right - reads on the file can then proceed during the
+	   expensive migration step */
 	ret = dm_downgrade_right(dmapi.sid, hanp, hlen, dmapi.token);
 	if (ret != 0) {
 		printf("dm_downgrade_right failed for %s - %s\n", path, strerror(errno));
@@ -98,6 +110,7 @@ static int hsm_migrate(const char *path)
         memset(attrname.an_chars, 0, DM_ATTR_NAME_SIZE);
         strncpy((char*)attrname.an_chars, HSM_ATTRNAME, DM_ATTR_NAME_SIZE);
 
+	/* get any existing attribute on the file */
 	ret = dm_get_dmattr(dmapi.sid, hanp, hlen, dmapi.token, &attrname, 
 			    sizeof(h), &h, &rlen);
 	if (ret != 0 && errno != ENOENT) {
@@ -105,19 +118,18 @@ static int hsm_migrate(const char *path)
 		goto respond;
 	}
 
+	/* check it is valid */
 	if (ret == 0) {
 		if (strncmp(h.magic, HSM_MAGIC, sizeof(h.magic)) != 0) {
 			printf("Bad magic '%*.*s'\n", (int)sizeof(h.magic), (int)sizeof(h.magic), h.magic);
 			exit(1);
 		}
 		if (h.state == HSM_STATE_START) {
-			if (h.migrate_time + 60 > time(NULL)) {
-				printf("Not migrating recent partially migrated file\n");
-				goto respond;
-			}
+			/* a migration has died on this file */
 			printf("Continuing migration of partly migrated file\n");
 			hsm_store_unlink(h.device, h.inode);
 		} else {
+			/* it is either fully migrated, or waiting recall */
 			printf("Not migrating already migrated file %s\n", path);
 			goto respond;
 		}
@@ -138,12 +150,14 @@ static int hsm_migrate(const char *path)
 		goto respond;
 	}
 
+	/* open up the store file */
 	fd = hsm_store_open(st.st_dev, st.st_ino, O_CREAT|O_TRUNC|O_WRONLY);
 	if (fd == -1) {
 		printf("Failed to open store file for %s - %s\n", path, strerror(errno));
 		goto respond;
 	}
 
+	/* read the file data and store it away */
 	ofs = 0;
 	while ((ret = dm_read_invis(dmapi.sid, hanp, hlen, dmapi.token, ofs, sizeof(buf), buf)) > 0) {
 		if (write(fd, buf, ret) != ret) {
@@ -176,7 +190,9 @@ static int hsm_migrate(const char *path)
 	h.inode = st.st_ino;
 	h.state = HSM_STATE_START;
 
-	ret = dm_set_dmattr(dmapi.sid, hanp, hlen, dmapi.token, &attrname, 0, sizeof(h), (void*)&h);
+	/* mark the file as starting to migrate */
+	ret = dm_set_dmattr(dmapi.sid, hanp, hlen, dmapi.token, &attrname, 0, 
+			    sizeof(h), (void*)&h);
 	if (ret == -1) {
 		printf("failed dm_set_dmattr on %s - %s\n", path, strerror(errno));
 		hsm_store_unlink(st.st_dev, st.st_ino);
@@ -195,15 +211,17 @@ static int hsm_migrate(const char *path)
 		goto respond;
 	}
 
+	/* this dm_get_dmattr() is not strictly necessary - it is just
+	   paranoia */
 	ret = dm_get_dmattr(dmapi.sid, hanp, hlen, dmapi.token, &attrname, 
 			    sizeof(h), &h, &rlen);
 	if (ret != 0) {
-		printf("Abandoning partial migrate - attribute gone\n");
+		printf("ERROR: Abandoning partial migrate - attribute gone!?\n");
 		goto respond;
 	}
 
 	if (h.state != HSM_STATE_START) {
-		printf("Abandoning partial migrate - state=%d\n", h.state);
+		printf("ERROR: Abandoning partial migrate - state=%d\n", h.state);
 		goto respond;
 	}
 
@@ -216,7 +234,9 @@ static int hsm_migrate(const char *path)
 
 	h.state = HSM_STATE_MIGRATED;
 
-	ret = dm_set_dmattr(dmapi.sid, hanp, hlen, dmapi.token, &attrname, 0, sizeof(h), (void*)&h);
+	/* mark the file as fully migrated */
+	ret = dm_set_dmattr(dmapi.sid, hanp, hlen, dmapi.token, &attrname, 
+			    0, sizeof(h), (void*)&h);
 	if (ret == -1) {
 		printf("failed dm_set_dmattr on %s - %s\n", path, strerror(errno));
 		hsm_store_unlink(st.st_dev, st.st_ino);
@@ -228,6 +248,7 @@ static int hsm_migrate(const char *path)
 	retval = 0;
 
 respond:
+	/* destroy our userevent */
 	ret = dm_respond_event(dmapi.sid, dmapi.token, DM_RESP_CONTINUE, 0, 0, NULL);
 	if (ret == -1) {
 		printf("failed dm_respond_event on %s - %s\n", path, strerror(errno));
