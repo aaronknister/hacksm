@@ -11,6 +11,10 @@
 #define SESSION_NAME "hacksm_ls"
 
 static struct {
+	bool dmapi_info;
+} options;
+
+static struct {
 	dm_sessid_t sid;
 	dm_token_t token;
 } dmapi = {
@@ -50,6 +54,61 @@ static void hsm_init(void)
 	hsm_recover_session(SESSION_NAME, &dmapi.sid);
 }
 
+
+
+/*
+  show detailed DMAPI information on a file
+ */
+static void hsm_show_dmapi_info(const char *path, void *hanp, size_t hlen)
+{
+	int ret, i;
+	dm_region_t *regions = NULL;
+	u_int nregions = 0;
+	char *buf = NULL;
+	size_t buflen = 0;
+	dm_stat_t st;
+
+	while ((ret = dm_get_region(dmapi.sid, hanp, hlen, dmapi.token, 
+				    nregions, regions, &nregions)) == -1 && 
+	       errno == E2BIG) {
+		regions = realloc(regions, sizeof(dm_region_t)*nregions);
+	}
+	if (ret == 0) {
+		printf("Managed regions:\n");
+		for (i=0;i<nregions;i++) {
+			printf("\trg_offset=0x%llx rg_size=0x%llx rg_flags=0x%x rg_opaque=0x%x\n",
+			       (unsigned long long)regions[i].rg_offset,
+			       (unsigned long long)regions[i].rg_size,
+			       (unsigned)regions[i].rg_flags,
+			       (unsigned)regions[i].rg_opaque);
+		}
+	}
+	if (regions) free(regions);
+
+	while ((ret = dm_getall_dmattr(dmapi.sid, hanp, hlen, dmapi.token, 
+				       buflen, buf, &buflen)) == -1 && 
+	       errno == E2BIG) {
+		buf = realloc(buf, buflen);
+	}
+	if (ret == 0) {
+		dm_attrlist_t *attr;
+		printf("DMAPI Attributes:\n");
+		for (attr=(dm_attrlist_t *)buf; 
+		     attr; 
+		     attr = DM_STEP_TO_NEXT(attr, dm_attrlist_t *)) {
+			printf("\t'%*.*s' length=0x%x\n", 
+			       DM_ATTR_NAME_SIZE, DM_ATTR_NAME_SIZE,
+			       attr->al_name.an_chars, attr->al_data.vd_length);
+		}		
+	}
+	if (buf) free(buf);
+
+	if ((ret = dm_get_fileattr(dmapi.sid, hanp, hlen, dmapi.token, 0, &st)) == 0) {
+		printf("DMAPI fileattr ok\n");
+	}
+}
+
+
 /*
   list one file
  */
@@ -85,6 +144,10 @@ static void hsm_ls(const char *path)
 	if (ret != 0) {
 		printf("dm_request_right failed for %s - %s\n", path, strerror(errno));
 		goto done;
+	}
+
+	if (options.dmapi_info) {
+		hsm_show_dmapi_info(path, hanp, hlen);
 	}
 
         memset(attrname.an_chars, 0, DM_ATTR_NAME_SIZE);
@@ -160,7 +223,9 @@ static void hsm_lsdir(const char *path)
 
 static void usage(void)
 {
-	printf("Usage: hacksm_ls PATH..\n");
+	printf("Usage: hacksm_ls <options> PATH..\n");
+	printf("\n\tOptions:\n");
+	printf("\t\t -D                 show detailed DMAPI info for each file\n");
 	exit(0);
 }
 
@@ -169,8 +234,11 @@ int main(int argc, char * const argv[])
 	int opt, i;
 
 	/* parse command-line options */
-	while ((opt = getopt(argc, argv, "h")) != -1) {
+	while ((opt = getopt(argc, argv, "hD")) != -1) {
 		switch (opt) {
+		case 'D':
+			options.dmapi_info = true;
+			break;
 		case 'h':
 		default:
 			usage();
