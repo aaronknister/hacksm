@@ -201,7 +201,7 @@ static int hsm_migrate(const char *path)
 
 	/* mark the whole file as offline, including parts beyond EOF */
 	region.rg_offset = 0;
-	region.rg_size   = (dm_size_t)~0ULL;
+	region.rg_size   = 0; /* zero means the whole file */
 	region.rg_flags  = DM_REGION_WRITE | DM_REGION_READ;
 
 	ret = dm_set_region(dmapi.sid, hanp, hlen, dmapi.token, 1, &region, &exactFlag);
