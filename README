@@ -26,18 +26,44 @@ Then start the HSM daemon like this:
 
    hacksmd &
 
-You can then migrate files using hacksm_migrate, and view their state
-using hacksm_ls
+Optional parameters to hacksmd are:
 
-Note that if you have TSM installed you need to disable it. The simplest method is:
+        -c                 cleanup lost tokens
+        -N                 use a non-blocking event wait
+        -d level           choose debug level
+        -F                 fork to handle each event
+        -R delay           set a random delay on recall up to 'delay' seconds
+
+The -F and -R options can be used to simulate the delays associated
+with tape based HSM systems. The -N option is useful to work around a
+GPFS bug that makes hacksmd unkillable when waiting for events.
+
+The -c option is a debugging option to cleanup any lost tokens. Lost
+tokens are also automatically restarted when the daemon starts up.
+
+If GPFS has not started when hacksmd is started then it will wait for
+the DMAPI service to become active. This means you can start hacksmd
+at any time in the boot process.
+
+
+Migration
+---------
+
+Once started, you can migrate files using the hacksm_migrate
+tool. Just pass it the names of the files you want to migrate.
+
+To view the migration status of some files you can use hacksm_ls.
+
+TSM Installs
+------------
+
+Note that if you have TSM installed you need to disable it before
+using hacksm. The simplest method is:
 
    onnode -p all mv /opt/tivoli /opt/tivoli.SAVED
 
 then reboot. 
 
-If GPFS has not started when hacksmd is started then it will wait for
-the DMAPI service to become active. This means you can start hacksmd
-at any time in the boot process.
 
 The file store
 --------------
