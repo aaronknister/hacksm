@@ -524,6 +524,7 @@ static void hsm_cleanup_events(void)
 						 DM_RESP_ABORT, EINTR, 0, NULL);
 			} else {
 				unsigned saved_delay = options.recall_delay;
+				options.recall_delay = 0;
 				hsm_handle_message(msg);
 				options.recall_delay = saved_delay;
 			}
