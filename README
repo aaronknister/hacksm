@@ -1,4 +1,4 @@
-This is a experimental HSM daemon and migrate tool. It is meant to be
+This is an experimental HSM daemon and migrate tool. It is meant to be
 a platform for testing ideas in HSM migration.
 
 Written by Andrew Tridgell, August 2008
@@ -60,7 +60,7 @@ TSM Installs
 Note that if you have TSM installed you need to disable it before
 using hacksm. The simplest method is:
 
-   onnode -p all mv /opt/tivoli /opt/tivoli.SAVED
+   onnode -p all mv /opt/tivoli /opt/tivoli.DISABLED
 
 then reboot. 
 
