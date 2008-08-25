@@ -17,6 +17,8 @@ static struct {
 };
 
 
+static struct hsm_store_context *store_ctx;
+
 /*
   if we exit unexpectedly then we need to cleanup any rights we held
   by reponding to our userevent
@@ -49,6 +51,12 @@ static void hsm_init(void)
 	printf("Initialised DMAPI version '%s'\n", dmapi_version);	
 
 	hsm_recover_session(SESSION_NAME, &dmapi.sid);
+
+	store_ctx = hsm_store_init(void);
+	if (store_ctx == NULL) {
+		printf("Unable to open HSM store - %s\n", strerror(errno));
+		exit(1);
+	}
 }
 
 /*
@@ -67,7 +75,6 @@ static int hsm_migrate(const char *path)
 	dm_region_t region;
 	dm_boolean_t exactFlag;
 	off_t ofs;
-	int fd;
 	int retval = 1;
 
 	dmapi.token = DM_NO_TOKEN;
@@ -151,8 +158,8 @@ static int hsm_migrate(const char *path)
 	}
 
 	/* open up the store file */
-	fd = hsm_store_open(st.st_dev, st.st_ino, O_CREAT|O_TRUNC|O_WRONLY);
-	if (fd == -1) {
+	h = hsm_store_open(store_ctx, st.st_dev, st.st_ino, O_CREAT|O_TRUNC|O_WRONLY);
+	if (h == NULL) {
 		printf("Failed to open store file for %s - %s\n", path, strerror(errno));
 		goto respond;
 	}
@@ -160,9 +167,10 @@ static int hsm_migrate(const char *path)
 	/* read the file data and store it away */
 	ofs = 0;
 	while ((ret = dm_read_invis(dmapi.sid, hanp, hlen, dmapi.token, ofs, sizeof(buf), buf)) > 0) {
-		if (write(fd, buf, ret) != ret) {
+		if (hsm_store_write(h, buf, ret) != ret) {
 			printf("Failed to write to store for %s - %s\n", path, strerror(errno));
-			hsm_store_unlink(st.st_dev, st.st_ino);
+			hsm_store_close(h);
+			hsm_store_remove(store_ctx, st.st_dev, st.st_ino);
 			goto respond;
 		}
 		ofs += ret;
@@ -172,8 +180,7 @@ static int hsm_migrate(const char *path)
 		hsm_store_unlink(st.st_dev, st.st_ino);
 		goto respond;
 	}
-	fsync(fd);
-	close(fd);
+	hsm_store_close(h);
 
 	/* now upgrade to a exclusive right on the file before we
 	   change the dmattr and punch holes in the file. */

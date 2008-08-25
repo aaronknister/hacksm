@@ -25,6 +25,8 @@ static struct {
 	.sid = DM_NO_SESSION
 };
 
+static struct hsm_store_context *store_ctx;
+
 #define SESSION_NAME "hacksmd"
 
 /* no special handling on terminate in hacksmd, as we want existing
@@ -47,6 +49,16 @@ static void hsm_init(void)
 	dm_eventset_t eventSet;
 	int ret;
 	int errcode = 0;
+
+	if (store_ctx) {
+		hsm_store_shutdown(store_ctx);
+	}
+
+	store_ctx = hsm_store_init(void);
+	if (store_ctx == NULL) {
+		printf("Unable to open HSM store - %s\n", strerror(errno));
+		exit(1);
+	}
 
 	while ((ret = dm_init_service(&dmapi_version)) == -1) {
 		if (errno != errcode) {
@@ -132,12 +144,12 @@ static void hsm_handle_recall(dm_eventmsg_t *msg)
 	dm_token_t token = msg->ev_token;
 	struct hsm_attr h;
 	dm_boolean_t exactFlag;
-	int fd;
 	char buf[0x10000];
 	off_t ofs;
 	dm_right_t right;
 	dm_response_t response = DM_RESP_CONTINUE;
 	int retcode = 0;
+	struct hsm_store_handle *h;
 
         ev = DM_GET_VALUE(msg, ev_data, dm_data_event_t *);
         hanp = DM_GET_VALUE(ev, de_handle, void *);
@@ -212,10 +224,11 @@ static void hsm_handle_recall(dm_eventmsg_t *msg)
 
 	/* get the migrated data from the store, and put it in the
 	   file with invisible writes */
-	fd = hsm_store_open(h.device, h.inode, O_RDONLY);
-	if (fd == -1) {
-		printf("Failed to open store file for file 0x%llx:0x%llx\n",
-		       (unsigned long long)h.device, (unsigned long long)h.inode);
+	h = hsm_store_open(store_ctx, h.device, h.inode, O_RDONLY);
+	if (h == NULL) {
+		printf("Failed to open store file for file 0x%llx:0x%llx - %s\n",
+		       (unsigned long long)h.device, (unsigned long long)h.inode,
+		       strerror(errno));
 		retcode = EIO;
 		response = DM_RESP_ABORT;
 		goto done;
@@ -234,7 +247,7 @@ static void hsm_handle_recall(dm_eventmsg_t *msg)
 	}
 
 	ofs = 0;
-	while ((ret = read(fd, buf, sizeof(buf))) > 0) {
+	while ((ret = hsm_store_read(h, buf, sizeof(buf))) > 0) {
 		int ret2 = dm_write_invis(dmapi.sid, hanp, hlen, token, DM_WRITE_SYNC, ofs, ret, buf);
 		if (ret2 != ret) {
 			printf("dm_write_invis failed - %s\n", strerror(errno));
@@ -244,7 +257,7 @@ static void hsm_handle_recall(dm_eventmsg_t *msg)
 		}
 		ofs += ret;
 	}
-	close(fd);
+	hsm_store_close(h);
 
 	/* remove the attribute from the file - it is now fully recalled */
 	ret = dm_remove_dmattr(dmapi.sid, hanp, hlen, token, 0, &attrname);
@@ -256,7 +269,7 @@ static void hsm_handle_recall(dm_eventmsg_t *msg)
 	}
 
 	/* remove the store file */
-	ret = hsm_store_unlink(h.device, h.inode);
+	ret = hsm_store_remove(store_ctx, h.device, h.inode);
 	if (ret != 0) {
 		printf("WARNING: Failed to unlink store file\n");
 	}
@@ -359,7 +372,7 @@ static void hsm_handle_destroy(dm_eventmsg_t *msg)
 	}
 
 	/* remove the store file */
-	ret = hsm_store_unlink(h.device, h.inode);
+	ret = hsm_store_remove(store_ctx, h.device, h.inode);
 	if (ret == -1) {
 		printf("WARNING: Failed to unlink store file for file 0x%llx:0x%llx\n",
 		       (unsigned long long)h.device, (unsigned long long)h.inode);

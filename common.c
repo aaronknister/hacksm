@@ -106,27 +106,6 @@ new_session:
 }
 
 
-int hsm_store_open(dev_t device, ino_t inode, int flags)
-{
-	char *fname = NULL;
-	asprintf(&fname, HSM_STORE "/0x%llx:0x%llx",
-		 (unsigned long long)device, (unsigned long long)inode);
-	int fd = open(fname, flags, 0600);
-	free(fname);
-	return fd;
-}
-
-int hsm_store_unlink(dev_t device, ino_t inode)
-{
-	char *fname = NULL;
-	int ret;
-	asprintf(&fname, HSM_STORE "/0x%llx:0x%llx",
-		 (unsigned long long)device, (unsigned long long)inode);
-	ret = unlink(fname);
-	free(fname);
-	return ret;
-}
-
 void msleep(int t)
 {
 	struct timeval tval;  

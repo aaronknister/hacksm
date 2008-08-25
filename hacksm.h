@@ -48,4 +48,4 @@ struct hsm_attr {
 #define HSM_MAGIC "HSM1"
 #define HSM_ATTRNAME "hacksm"
 
-#define HSM_STORE "/hacksm_store"
+#include "store.h"

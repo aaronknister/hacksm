@@ -21,6 +21,8 @@ static struct {
 	.sid = DM_NO_SESSION
 };
 
+static struct hsm_store_context *store_ctx;
+
 /*
   if we exit unexpectedly then we need to cleanup any rights we held
   by reponding to our userevent
@@ -52,6 +54,12 @@ static void hsm_init(void)
 	printf("Initialised DMAPI version '%s'\n", dmapi_version);	
 
 	hsm_recover_session(SESSION_NAME, &dmapi.sid);
+
+	store_ctx = hsm_store_init(void);
+	if (store_ctx == NULL) {
+		printf("Unable to open HSM store - %s\n", strerror(errno));
+		exit(1);
+	}
 }
 
 
@@ -172,13 +180,14 @@ static void hsm_ls(const char *path)
 
 	/* if it is migrated then also check the store file is OK */
 	if (h.state == HSM_STATE_MIGRATED) {
-		fd = hsm_store_open(h.device, h.inode, O_RDONLY);
-		if (fd == -1) {
+		struct hsm_store_handle *h;
+		h = hsm_store_open(store_ctx, h.device, h.inode, true);
+		if (h == NULL) {
 			printf("Failed to open store file for %s - %s (0x%llx:0x%llx)\n", 
 			       path, strerror(errno), 
 			       (unsigned long long)h.device, (unsigned long long)h.inode);
 		}
-		close(fd);
+		hsm_store_close(h);
 	}
 
 	printf("m %7u %d  %s\n", (unsigned)h.size, (int)h.state, path);
