@@ -33,7 +33,7 @@ struct hsm_store_context *hsm_store_init(void)
 		return NULL;
 	}
 
-	ctx->basepath = HSM_STORE;
+	ctx->basepath = HSM_STORE_PATH;
 	if (stat(ctx->basepath, &st) != 0 ||
 	    !S_ISDIR(st.st_mode)) {
 		errno = EINVAL;

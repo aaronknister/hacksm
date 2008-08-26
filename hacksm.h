@@ -24,8 +24,6 @@
 
 const char *dmapi_event_string(dm_eventtype_t ev);
 void hsm_recover_session(const char *name, dm_sessid_t *sid);
-int hsm_store_open(dev_t device, ino_t inode, int flags);
-int hsm_store_unlink(dev_t device, ino_t inode);
 void msleep(int t);
 void hsm_cleanup_tokens(dm_sessid_t sid, dm_response_t response, int retcode);
 const char *timestring(void);
@@ -42,7 +40,7 @@ struct hsm_attr {
 	uint64_t size;
 	uint64_t device;
 	uint64_t inode;
-	enum hsm_migrate_state state;
+	uint8_t  state;
 };
 
 #define HSM_MAGIC "HSM1"

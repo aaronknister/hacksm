@@ -55,7 +55,7 @@ static void hsm_init(void)
 
 	hsm_recover_session(SESSION_NAME, &dmapi.sid);
 
-	store_ctx = hsm_store_init(void);
+	store_ctx = hsm_store_init();
 	if (store_ctx == NULL) {
 		printf("Unable to open HSM store - %s\n", strerror(errno));
 		exit(1);
@@ -128,7 +128,6 @@ static void hsm_ls(const char *path)
 	dm_attrname_t attrname;
 	size_t rlen;
 	struct hsm_attr h;
-	int fd;
 
 	dmapi.token = DM_NO_TOKEN;
 
@@ -180,14 +179,14 @@ static void hsm_ls(const char *path)
 
 	/* if it is migrated then also check the store file is OK */
 	if (h.state == HSM_STATE_MIGRATED) {
-		struct hsm_store_handle *h;
-		h = hsm_store_open(store_ctx, h.device, h.inode, true);
-		if (h == NULL) {
+		struct hsm_store_handle *handle;
+		handle = hsm_store_open(store_ctx, h.device, h.inode, true);
+		if (handle == NULL) {
 			printf("Failed to open store file for %s - %s (0x%llx:0x%llx)\n", 
 			       path, strerror(errno), 
 			       (unsigned long long)h.device, (unsigned long long)h.inode);
 		}
-		hsm_store_close(h);
+		hsm_store_close(handle);
 	}
 
 	printf("m %7u %d  %s\n", (unsigned)h.size, (int)h.state, path);

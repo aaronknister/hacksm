@@ -52,7 +52,7 @@ static void hsm_init(void)
 
 	hsm_recover_session(SESSION_NAME, &dmapi.sid);
 
-	store_ctx = hsm_store_init(void);
+	store_ctx = hsm_store_init();
 	if (store_ctx == NULL) {
 		printf("Unable to open HSM store - %s\n", strerror(errno));
 		exit(1);
@@ -68,7 +68,7 @@ static int hsm_migrate(const char *path)
 	void *hanp = NULL;
 	size_t hlen = 0;
 	dm_attrname_t attrname;
-	char buf[0x1000];
+	uint8_t buf[0x1000];
 	size_t rlen;
 	struct stat st;
 	struct hsm_attr h;
@@ -76,6 +76,7 @@ static int hsm_migrate(const char *path)
 	dm_boolean_t exactFlag;
 	off_t ofs;
 	int retval = 1;
+	struct hsm_store_handle *handle;
 
 	dmapi.token = DM_NO_TOKEN;
 
@@ -134,7 +135,7 @@ static int hsm_migrate(const char *path)
 		if (h.state == HSM_STATE_START) {
 			/* a migration has died on this file */
 			printf("Continuing migration of partly migrated file\n");
-			hsm_store_unlink(h.device, h.inode);
+			hsm_store_remove(store_ctx, h.device, h.inode);
 		} else {
 			/* it is either fully migrated, or waiting recall */
 			printf("Not migrating already migrated file %s\n", path);
@@ -158,8 +159,8 @@ static int hsm_migrate(const char *path)
 	}
 
 	/* open up the store file */
-	h = hsm_store_open(store_ctx, st.st_dev, st.st_ino, O_CREAT|O_TRUNC|O_WRONLY);
-	if (h == NULL) {
+	handle = hsm_store_open(store_ctx, st.st_dev, st.st_ino, false);
+	if (handle == NULL) {
 		printf("Failed to open store file for %s - %s\n", path, strerror(errno));
 		goto respond;
 	}
@@ -167,9 +168,9 @@ static int hsm_migrate(const char *path)
 	/* read the file data and store it away */
 	ofs = 0;
 	while ((ret = dm_read_invis(dmapi.sid, hanp, hlen, dmapi.token, ofs, sizeof(buf), buf)) > 0) {
-		if (hsm_store_write(h, buf, ret) != ret) {
+		if (hsm_store_write(handle, buf, ret) != ret) {
 			printf("Failed to write to store for %s - %s\n", path, strerror(errno));
-			hsm_store_close(h);
+			hsm_store_close(handle);
 			hsm_store_remove(store_ctx, st.st_dev, st.st_ino);
 			goto respond;
 		}
@@ -177,10 +178,11 @@ static int hsm_migrate(const char *path)
 	}
 	if (ret == -1) {
 		printf("failed dm_read_invis on %s - %s\n", path, strerror(errno));
-		hsm_store_unlink(st.st_dev, st.st_ino);
+		hsm_store_close(handle);
+		hsm_store_remove(store_ctx, st.st_dev, st.st_ino);
 		goto respond;
 	}
-	hsm_store_close(h);
+	hsm_store_close(handle);
 
 	/* now upgrade to a exclusive right on the file before we
 	   change the dmattr and punch holes in the file. */
@@ -202,7 +204,7 @@ static int hsm_migrate(const char *path)
 			    sizeof(h), (void*)&h);
 	if (ret == -1) {
 		printf("failed dm_set_dmattr on %s - %s\n", path, strerror(errno));
-		hsm_store_unlink(st.st_dev, st.st_ino);
+		hsm_store_remove(store_ctx, st.st_dev, st.st_ino);
 		goto respond;
 	}
 
@@ -214,7 +216,7 @@ static int hsm_migrate(const char *path)
 	ret = dm_set_region(dmapi.sid, hanp, hlen, dmapi.token, 1, &region, &exactFlag);
 	if (ret == -1) {
 		printf("failed dm_set_region on %s - %s\n", path, strerror(errno));
-		hsm_store_unlink(st.st_dev, st.st_ino);
+		hsm_store_remove(store_ctx, st.st_dev, st.st_ino);
 		goto respond;
 	}
 
@@ -235,7 +237,7 @@ static int hsm_migrate(const char *path)
 	ret = dm_punch_hole(dmapi.sid, hanp, hlen, dmapi.token, 0, st.st_size);
 	if (ret == -1) {
 		printf("failed dm_punch_hole on %s - %s\n", path, strerror(errno));
-		hsm_store_unlink(st.st_dev, st.st_ino);
+		hsm_store_remove(store_ctx, st.st_dev, st.st_ino);
 		goto respond;
 	}
 
@@ -246,7 +248,7 @@ static int hsm_migrate(const char *path)
 			    0, sizeof(h), (void*)&h);
 	if (ret == -1) {
 		printf("failed dm_set_dmattr on %s - %s\n", path, strerror(errno));
-		hsm_store_unlink(st.st_dev, st.st_ino);
+		hsm_store_remove(store_ctx, st.st_dev, st.st_ino);
 		goto respond;
 	}
 

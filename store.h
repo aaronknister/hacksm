@@ -32,3 +32,9 @@ int hsm_store_close(struct hsm_store_handle *);
    shutdown the link to the store
  */
 void hsm_store_shutdown(struct hsm_store_context *);
+
+/*
+  remove a file from the store
+ */
+int hsm_store_remove(struct hsm_store_context *ctx,
+		     dev_t device, ino_t inode);
