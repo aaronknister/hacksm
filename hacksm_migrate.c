@@ -57,6 +57,11 @@ static void hsm_init(void)
 		printf("Unable to open HSM store - %s\n", strerror(errno));
 		exit(1);
 	}
+
+	if (hsm_store_connect(store_ctx, "/gpfs") != 0) {
+		printf("Failed to connect to HSM store\n");
+		exit(1);
+	}
 }
 
 /*
@@ -168,7 +173,7 @@ static int hsm_migrate(const char *path)
 	/* read the file data and store it away */
 	ofs = 0;
 	while ((ret = dm_read_invis(dmapi.sid, hanp, hlen, dmapi.token, ofs, sizeof(buf), buf)) > 0) {
-		if (hsm_store_write(handle, buf, ret) != ret) {
+		if (hsm_store_write(handle, buf, ret) != 0) {
 			printf("Failed to write to store for %s - %s\n", path, strerror(errno));
 			hsm_store_close(handle);
 			hsm_store_remove(store_ctx, st.st_dev, st.st_ino);

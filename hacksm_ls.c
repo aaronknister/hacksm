@@ -60,6 +60,11 @@ static void hsm_init(void)
 		printf("Unable to open HSM store - %s\n", strerror(errno));
 		exit(1);
 	}
+
+	if (hsm_store_connect(store_ctx, "/gpfs") != 0) {
+		printf("Failed to connect to HSM store\n");
+		exit(1);
+	}
 }
 
 

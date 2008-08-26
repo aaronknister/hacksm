@@ -11,6 +11,7 @@
 
 struct hsm_store_context {
 	const char *basepath;
+	const char *errmsg;
 };
 
 struct hsm_store_handle {
@@ -25,23 +26,41 @@ struct hsm_store_handle {
 struct hsm_store_context *hsm_store_init(void)
 {
 	struct hsm_store_context *ctx;
-	struct stat st;
 
-	ctx = malloc(sizeof(struct hsm_store_context));
+	ctx = calloc(1, sizeof(struct hsm_store_context));
 	if (ctx == NULL) {
 		errno = ENOMEM;
 		return NULL;
 	}
 
-	ctx->basepath = HSM_STORE_PATH;
-	if (stat(ctx->basepath, &st) != 0 ||
-	    !S_ISDIR(st.st_mode)) {
-		errno = EINVAL;
-		free(ctx);
-		return NULL;
-	}
+	ctx->errmsg = "";
 
 	return ctx;
+}
+
+/*
+  return an error message for the last failed operation
+ */
+const char *hsm_store_errmsg(struct hsm_store_context *ctx)
+{
+	return ctx->errmsg;
+}
+
+/*
+  connect to the store
+ */
+int hsm_store_connect(struct hsm_store_context *ctx, const char *fsname)
+{
+	struct stat st;
+
+	ctx->basepath = HSM_STORE_PATH;
+
+	if (stat(ctx->basepath, &st) != 0 || !S_ISDIR(st.st_mode)) {
+		ctx->errmsg = "Invalid store path";
+		return -1;
+	}
+
+	return 0;
 }
 
 /*
@@ -80,11 +99,13 @@ struct hsm_store_handle *hsm_store_open(struct hsm_store_context *ctx,
 
 	fname = store_fname(ctx, device, inode);
 	if (fname == NULL) {
+		ctx->errmsg = "Unable to allocate store filename";
 		return NULL;
 	}
 
 	h = malloc(sizeof(struct hsm_store_handle));
 	if (h == NULL) {
+		ctx->errmsg = "Unable to allocate store handle";
 		errno = ENOMEM;
 		free(fname);
 		return NULL;
@@ -102,6 +123,7 @@ struct hsm_store_handle *hsm_store_open(struct hsm_store_context *ctx,
 	free(fname);
 
 	if (h->fd == -1) {
+		ctx->errmsg = "Unable to open store file";
 		free(h);
 		return NULL;
 	}
@@ -139,9 +161,14 @@ size_t hsm_store_read(struct hsm_store_handle *h, uint8_t *buf, size_t n)
 /*
   write to a stored file
  */
-size_t hsm_store_write(struct hsm_store_handle *h, uint8_t *buf, size_t n)
+int hsm_store_write(struct hsm_store_handle *h, uint8_t *buf, size_t n)
 {
-	return write(h->fd, buf, n);
+	size_t nwritten = write(h->fd, buf, n);
+	if (nwritten != n) {
+		h->ctx->errmsg = "write failed";
+		return -1;
+	}
+	return 0;
 }
 
 /*
